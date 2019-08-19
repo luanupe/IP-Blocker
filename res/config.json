@@ -1,0 +1,10 @@
+{
+	"listeners": [
+		{
+			"portToCheck": 5588,
+			"delayToCheck": 300,
+			"connBanLimit": 3,
+			"connBanTimeout": 30000
+		}
+	]
+}
