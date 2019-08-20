@@ -1,9 +1,7 @@
 package world.laf;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -14,10 +12,11 @@ import net.sf.json.JSONObject;
 // netsh advfirewall firewall add rule name="LAF - IP Block 192.198.10.100" dir=in interface=any action=block remoteip=192.198.10.100
 // netsh advfirewall firewall delete rule name="LAF - IP Block 192.198.10.100"
 public class DDoSController {
-	
+
+	private static final Map<Integer, JSONObject> BAN_LIST = new HashMap<Integer, JSONObject>();
+	private JSONObject banList;
 	private Map<String, DDoSClient> clients;
 	private int port, connections, timeout;
-	private JSONObject banList;
 	
 	protected DDoSController(int port, int connections, int timeout) throws Exception {
 		this.clients = new HashMap<String, DDoSClient>();
@@ -28,15 +27,21 @@ public class DDoSController {
 	}
 	
 	private void init() throws Exception {
-		File file = new File("res\\block\\" + this.port + ".json");
-		if ((file.exists())) {
-			FileInputStream input = new FileInputStream(file);
-			Scanner reader = new Scanner(input, "UTF-8");
-			String content = reader.useDelimiter("\\A").next();
-			reader.close();
-			this.banList = JSONObject.fromObject(content);
-		} else {
-			this.banList = new JSONObject();
+		synchronized (DDoSController.BAN_LIST) {
+			JSONObject banList = DDoSController.BAN_LIST.get(this.port);
+			if ((banList == null) || (banList.isNullObject())) {
+				File file = new File("res\\block\\" + this.port + ".json");
+				if ((file.exists())) {
+					FileInputStream input = new FileInputStream(file);
+					Scanner reader = new Scanner(input, "UTF-8");
+					String content = reader.useDelimiter("\\A").next();
+					reader.close();
+					banList = JSONObject.fromObject(content);
+				} else {
+					banList = new JSONObject();
+				}
+			}
+			this.banList = DDoSController.BAN_LIST.put(this.port, banList);
 		}
 	}
 	
@@ -48,7 +53,6 @@ public class DDoSController {
 	protected void finish() {
 		this.unban();
 		this.ban();
-		this.saveBanList();
 	}
 	
 	private void ban() {
@@ -76,6 +80,7 @@ public class DDoSController {
 				// Atualiza o tempo do banimento (se já estiver banido simplesmente recomeça a contagem)
 				ban.put("timestamp", System.currentTimeMillis());
 				this.banList.put(ban.getString("address"), ban);
+				this.saveBanList();
 			}
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -98,6 +103,7 @@ public class DDoSController {
 					
 					// Remove da lista de banimentos
 					this.banList.remove(ban.getString("address"));
+					this.saveBanList();
 				}
 			} catch (Exception e) {
 				e.printStackTrace();
