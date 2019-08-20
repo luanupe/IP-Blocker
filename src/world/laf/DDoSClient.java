@@ -20,8 +20,8 @@ public class DDoSClient {
 		this.ports.add(port);
 	}
 	
-	public String getBanFirewall() {
-		return "LAF - IP Block " + this.getAddress();
+	public String getBanFirewall(int port) {
+		return "Address " + this.getAddress() + " on Port " + port;
 	}
 	
 	public String getAddress() {

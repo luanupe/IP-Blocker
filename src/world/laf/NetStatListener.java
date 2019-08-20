@@ -10,6 +10,7 @@ public class NetStatListener {
 		ArrayList<NetStatProtocol> netstat = new ArrayList<>();
 		ProcessBuilder builder = new ProcessBuilder( "netstat", "-n" );
 		Process p = builder.start();
+		
 		try (Scanner scanner = new Scanner(p.getInputStream())) {
 			Pattern pattern = Pattern.compile( "(TCP|UDP)\\s+(\\S+)\\s+(\\S+)\\s+(\\S+)" );
 			while (scanner.findWithinHorizon(pattern, 0) != null) {

@@ -1,18 +1,19 @@
 package world.laf;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.sql.Date;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Scanner;
 import net.sf.json.JSONObject;
 
-// netsh advfirewall firewall add rule name="LAF - IP Block 192.198.10.100" dir=in interface=any action=block remoteip=192.198.10.100
-// netsh advfirewall firewall delete rule name="LAF - IP Block 192.198.10.100"
 public class DDoSController {
-
+	
 	private static final Map<Integer, JSONObject> BAN_LIST = new HashMap<Integer, JSONObject>();
 	private JSONObject banList;
 	private Map<String, DDoSClient> clients;
@@ -41,7 +42,9 @@ public class DDoSController {
 					banList = new JSONObject();
 				}
 			}
-			this.banList = DDoSController.BAN_LIST.put(this.port, banList);
+			
+			DDoSController.BAN_LIST.put(this.port, banList);
+			this.banList = banList;
 		}
 	}
 	
@@ -53,6 +56,9 @@ public class DDoSController {
 	protected void finish() {
 		this.unban();
 		this.ban();
+		
+		this.clients.clear();
+		this.clients = null;
 	}
 	
 	private void ban() {
@@ -66,16 +72,19 @@ public class DDoSController {
 			// Adiciona a lista de banimentos se não já estiver banido
 			JSONObject ban = this.banList.getJSONObject(client.getAddress());
 			if ((ban == null) || (ban.isNullObject())) {
-				System.out.println("\t[" + this.port + "] " + client.getTotal() + " connections... Adding IP to block list: " + client.getAddress());
+				String name = client.getBanFirewall(this.port);
+				this.log(client.getTotal() + " connections... Black listing " + name);
 				
-				// Roda o processo pra ADICIONAR a regra no firewall
-				Process p = Runtime.getRuntime().exec("cmd /c netsh advfirewall firewall add rule name=\"" + client.getBanFirewall() + "\" dir=in interface=any action=block remoteip=" + client.getAddress()); 
+				// Roda o cmd pra ADICIONAR a regra no firewall
+				Process p = Runtime.getRuntime().exec("cmd /c netsh advfirewall firewall add rule name=\"" + name + "\" dir=in protocol=any interface=any action=block remoteip=" + client.getAddress()); 
 	            p.waitFor();
 	            
+	            // Cria o histórico pra salvar no arquivo
 				ban = new JSONObject();
-				ban.put("name", client.getBanFirewall());
+				ban.put("name", name);
 				ban.put("connections", client.getTotal());
 				ban.put("address", client.getAddress());
+				ban.put("port", this.port);
 				
 				// Atualiza o tempo do banimento (se já estiver banido simplesmente recomeça a contagem)
 				ban.put("timestamp", System.currentTimeMillis());
@@ -88,23 +97,30 @@ public class DDoSController {
 	}
 	
 	private void unban() {
+		Map<String, JSONObject> results = new HashMap<String, JSONObject>();
 		Iterator<String> keys = this.banList.keys();
+		
+		// Precisei duplicar a lista pra evitar Exception de acesso simultâneo
 		while(keys.hasNext()) {
-			JSONObject ban = this.banList.getJSONObject(keys.next());
-			long banExpires = ban.getLong("timestamp") + this.timeout;
-			
+			String key = keys.next();
+			JSONObject ban = this.banList.getJSONObject(key);
+			long banExpires = ban.getLong("timestamp") + (this.timeout * ban.getInt("connections"));
+			if ((System.currentTimeMillis() >= banExpires)) results.put(key, ban);
+		}
+		
+		// Remover a regras do firewall e IPs da banList
+		for (Map.Entry<String, JSONObject> result : results.entrySet()) {
 			try {
-				if ((System.currentTimeMillis() >= banExpires)) {
-					System.out.println("\t[" + this.port + "] Removing IP from block list: " + ban.getString("address"));
-					
-					// Roda o processo pra REMOVER a regra do firewall
-					Process p = Runtime.getRuntime().exec("cmd /c netsh advfirewall firewall delete rule name=\"" + ban.getString("name") + "\""); 
-		            p.waitFor();
-					
-					// Remove da lista de banimentos
-					this.banList.remove(ban.getString("address"));
-					this.saveBanList();
-				}
+				JSONObject ban = this.banList.getJSONObject(result.getKey());
+				this.log("Removing address from black list: " + result.getKey());
+				
+				// Roda o cmd pra REMOVER a regra do firewall
+				Process p = Runtime.getRuntime().exec("cmd /c netsh advfirewall firewall delete rule name=\"" + ban.getString("name") + "\""); 
+	            p.waitFor();
+				
+				// Remove da lista de banimentos
+				this.banList.remove(result.getKey());
+				this.saveBanList();
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
@@ -118,6 +134,10 @@ public class DDoSController {
 			out.close();
 		} catch (Exception e) {
 			e.printStackTrace();
+		} finally {
+			synchronized (DDoSController.BAN_LIST) {
+				DDoSController.BAN_LIST.put(this.port, this.banList);
+			}
 		}
 	}
 	
@@ -134,16 +154,20 @@ public class DDoSController {
 	
 	public String toString() {
 		StringBuilder builder = new StringBuilder();
-		builder.append("--- [ Port Stats " + this.port + " ] ----------------------------------").append("\n");
 		Iterator<String> keys = this.banList.keys();
 		while (keys.hasNext()) {
 			String key = keys.next();
-			builder.append("IP Address banned: ").append(key).append("\n");
+			JSONObject ban = this.banList.getJSONObject(key);
+			Date date = new Date(ban.getLong("timestamp"));
+			builder.append("\t").append("Address ").append(key).append(" black listed until ").append(date.toGMTString()).append("\n");
 		}
-		/*for (Map.Entry<String, DDoSClient> client : this.clients.entrySet()) {
-			builder.append(client.getValue().toString()).append("\n");
-		}*/
 		return builder.append("\n").toString();
+	}
+	
+	// Logging
+	
+	public void log(String message) {
+		System.out.println("\t[" + this.port + "] " + message);
 	}
 
 }
