@@ -1,9 +1,7 @@
 package world.laf;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -83,22 +81,28 @@ public class DDoSController {
 	}
 	
 	private void unban() {
+		Map<String, JSONObject> results = new HashMap<String, JSONObject>();
 		Iterator<String> keys = this.banList.keys();
+		
+		// Precisei duplicar a lista pra evitar Exception de acesso simultâneo
 		while(keys.hasNext()) {
-			JSONObject ban = this.banList.getJSONObject(keys.next());
+			String key = keys.next();
+			JSONObject ban = this.banList.getJSONObject(key);
 			long banExpires = ban.getLong("timestamp") + this.timeout;
-			
+			if ((System.currentTimeMillis() >= banExpires)) results.put(key, ban);
+		}
+		
+		// Remover a regras do firewall e IPs da banList
+		for (Map.Entry<String, JSONObject> result : results.entrySet()) {
 			try {
-				if ((System.currentTimeMillis() >= banExpires)) {
-					System.out.println("\t[" + this.port + "] Removing IP from block list: " + ban.getString("address"));
-					
-					// Roda o processo pra REMOVER a regra do firewall
-					Process p = Runtime.getRuntime().exec("cmd /c netsh advfirewall firewall delete rule name=\"" + ban.getString("name") + "\""); 
-		            p.waitFor();
-					
-					// Remove da lista de banimentos
-					this.banList.remove(ban.getString("address"));
-				}
+				JSONObject ban = this.banList.getJSONObject(result.getKey());
+				System.out.println("\t[" + this.port + "] Removing IP from block list: " + result.getKey());
+				
+				Process p = Runtime.getRuntime().exec("cmd /c netsh advfirewall firewall delete rule name=\"" + ban.getString("name") + "\""); 
+	            p.waitFor();
+				
+				// Remove da lista de banimentos
+				this.banList.remove(result.getKey());
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
@@ -134,9 +138,6 @@ public class DDoSController {
 			String key = keys.next();
 			builder.append("IP Address banned: ").append(key).append("\n");
 		}
-		/*for (Map.Entry<String, DDoSClient> client : this.clients.entrySet()) {
-			builder.append(client.getValue().toString()).append("\n");
-		}*/
 		return builder.append("\n").toString();
 	}
 
